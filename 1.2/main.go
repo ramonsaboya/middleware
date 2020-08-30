@@ -61,6 +61,8 @@ func producerThread() {
 
 		produce(x)
 	}
+
+	exit <- true
 }
 
 func main() {
