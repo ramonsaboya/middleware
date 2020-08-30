@@ -7,50 +7,41 @@ import (
 	"time"
 )
 
-type consumerRes struct {
-	id   int
+type consumerDocument struct {
 	x    *int
 	cond *sync.Cond
 }
 
 var exit = make(chan bool)
 
-var consQueueCond = sync.NewCond(&sync.Mutex{})
-var consQueue = make([]*consumerRes, 0)
+var queue = NewThreadSafeQueue(10)
 
-func freeConsumers(n int) {
-	consQueueCond.L.Lock()
-	for len(consQueue) == 0 {
-		consQueueCond.Wait()
+func consume() int {
+	doc := newConsumerDocument()
+	queue.Push(doc)
+
+	doc.waitFilling()
+
+	return *doc.x
+}
+
+func produce(n int) {
+	queue.Lock()
+	for queue.Empty() {
+		queue.Wait()
 	}
-	for _, cons := range consQueue {
-		cons.cond.L.Lock()
-		cons.x = &n
-		fmt.Printf("producer signaled for consumer %d\n", cons.id)
-		cons.cond.Signal()
-		cons.cond.L.Unlock()
+	for !queue.Empty() {
+		doc := toDocument(queue.UnsafePop())
+		doc.fill(n)
 	}
-	consQueue = make([]*consumerRes, 0)
-	consQueueCond.L.Unlock()
+	queue.Unlock()
 }
 
 func consumerThread(id int) {
 	for {
-		cond := sync.NewCond(&sync.Mutex{})
-		res := consumerRes{id, nil, cond}
+		value := consume()
 
-		consQueueCond.L.Lock()
-		consQueue = append(consQueue, &res)
-		consQueueCond.Signal()
-		consQueueCond.L.Unlock()
-
-		cond.L.Lock()
-		for res.x == nil {
-			cond.Wait()
-		}
-		cond.L.Unlock()
-
-		fmt.Printf("%d consumer, consumed: %d\n", id, *res.x)
+		fmt.Printf("%d consumer, consumed: %d\n", id, value)
 	}
 }
 
@@ -61,7 +52,7 @@ func producerThread() {
 		x := rand.Intn(100)
 		fmt.Printf("produced %d\n", x)
 
-		freeConsumers(x)
+		produce(x)
 	}
 }
 
@@ -76,4 +67,30 @@ func main() {
 	go producerThread()
 
 	<-exit
+}
+
+func toDocument(value interface{}, err error) *consumerDocument {
+	return value.(*consumerDocument)
+}
+
+func newConsumerDocument() *consumerDocument {
+	return &consumerDocument{
+		nil,
+		sync.NewCond(&sync.Mutex{}),
+	}
+}
+
+func (doc *consumerDocument) waitFilling() {
+	doc.cond.L.Lock()
+	for doc.x == nil {
+		doc.cond.Wait()
+	}
+	doc.cond.L.Unlock()
+}
+
+func (doc *consumerDocument) fill(n int) {
+	doc.cond.L.Lock()
+	doc.x = &n
+	doc.cond.Signal()
+	doc.cond.L.Unlock()
 }
