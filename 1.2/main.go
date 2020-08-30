@@ -8,16 +8,19 @@ import (
 )
 
 type consumerDocument struct {
-	x    *int
-	cond *sync.Cond
+	consumerID int
+	x          *int
+	cond       *sync.Cond
 }
 
 var exit = make(chan bool)
 
 var queue = NewThreadSafeQueue(10)
 
+// func consume(consumerID int) int {
 func consume() int {
-	doc := newConsumerDocument()
+	// doc := newConsumerDocument(consumerID)
+	doc := newConsumerDocument(0)
 	queue.Push(doc)
 
 	doc.waitFilling()
@@ -38,10 +41,14 @@ func produce(n int) {
 }
 
 func consumerThread(id int) {
+	// time.Sleep(2 * time.Second)
 	for {
+		// fmt.Printf("consumer %d starting\n", id)
+
+		// value := consume(id)
 		value := consume()
 
-		fmt.Printf("%d consumer, consumed: %d\n", id, value)
+		fmt.Printf("consumer %d, consumed: %d\n", id, value)
 	}
 }
 
@@ -73,8 +80,9 @@ func toDocument(value interface{}, err error) *consumerDocument {
 	return value.(*consumerDocument)
 }
 
-func newConsumerDocument() *consumerDocument {
+func newConsumerDocument(consumerID int) *consumerDocument {
 	return &consumerDocument{
+		consumerID,
 		nil,
 		sync.NewCond(&sync.Mutex{}),
 	}
@@ -91,6 +99,7 @@ func (doc *consumerDocument) waitFilling() {
 func (doc *consumerDocument) fill(n int) {
 	doc.cond.L.Lock()
 	doc.x = &n
+	// fmt.Printf("producer signaled consumer %d\n", doc.consumerID)
 	doc.cond.Signal()
 	doc.cond.L.Unlock()
 }
